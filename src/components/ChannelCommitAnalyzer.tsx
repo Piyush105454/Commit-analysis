@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { commitAPI } from '@/services/api';
+import { commitAPI, youtubeAPI } from '@/services/api';
 import CommitAnalysisChart from '@/components/CommitAnalysisChart';
 
 interface Video {
@@ -113,21 +113,29 @@ const ChannelCommitAnalyzer: React.FC = () => {
     setState(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      // Call backend to fetch real YouTube videos
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/youtube/channel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel_url: channelUrl })
+      // Use the centralized API service which handles the base URL correctly
+      const response = await youtubeAPI.analyzeChannel({
+        channelName: channelUrl,
+        maxVideos: 50
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch videos: ${response.statusText}`);
+      if (!response.success && !response.videos) {
+        throw new Error(response.message || 'Failed to fetch videos');
       }
 
-      const data = await response.json();
+      // Backend returns { success: true, videos: [], count: n }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const videoData = (response.videos as any[]) || [];
 
-      // Transform backend response to Video format
-      const videos: Video[] = (data.videos || []).map((v: { id?: string; video_id?: string; title: string; description?: string; view_count?: number; like_count?: number; published_at?: string; thumbnail?: string }) => ({
+      if (videoData.length === 0) {
+        throw new Error('No videos found for this channel');
+      }
+
+      // Map backend video format to frontend Video interface if needed
+      // The backend returns keys like 'video_id' but frontend expects 'id'
+      // effectively re-mapping if necessary, though our updated backend might match
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const videos: Video[] = videoData.map((v: any) => ({
         id: v.id || v.video_id,
         title: v.title,
         description: v.description || '',
@@ -136,10 +144,6 @@ const ChannelCommitAnalyzer: React.FC = () => {
         published_at: v.published_at || new Date().toISOString(),
         thumbnail: v.thumbnail || 'https://via.placeholder.com/320x180',
       }));
-
-      if (videos.length === 0) {
-        throw new Error('No videos found for this channel');
-      }
 
       setState(prev => ({
         ...prev,
